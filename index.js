@@ -400,7 +400,7 @@ async function iceAndOffer(name) {
         } else {
             try {
                 connectedUser = name;
-                createDataChannel('input');
+                await createDataChannel('input');
                 await createOffer();
                 console.log("Offer created and sent");
             } catch (error) {
