@@ -4,7 +4,7 @@ const UglifyJS = require('uglify-js');
 const path = require('path');
 const app = express();
 
-app.get('/vrclient.min.js', (req, res) => {
+app.get('/robot-client.min.js', (req, res) => {
     const filePath = path.join(__dirname, 'client.js');
 
     if (!fs.existsSync(filePath)) {
