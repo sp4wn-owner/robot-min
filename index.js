@@ -46,6 +46,7 @@ let reconnectAttempts = 0;
 let simReconnectAttempts = 0;
 const reconnectDelay = 2000;
 const wsUrl = 'https://sp4wn-signaling-server.onrender.com';
+let isAudioEnabled = true;
 
 document.addEventListener('DOMContentLoaded', () => {
     let simServerCookie = getCookie('simserverurl');
@@ -392,7 +393,7 @@ function sendPW(message) {
     });
 }
 
-async function iceAndOffer(name) {
+function iceAndOffer(name) {
     if (peerConnection) {
         const iceState = peerConnection.iceConnectionState;
         if (iceState === "connected" || iceState === "completed") {
@@ -400,8 +401,9 @@ async function iceAndOffer(name) {
         } else {
             try {
                 connectedUser = name;
-                await createDataChannel('input');
-                await createOffer();
+                createDataChannel('input');
+                console.log('Data channel created. Now creating offer...');
+                createOffer();
                 console.log("Offer created and sent");
             } catch (error) {
                 console.error("Error during watchStream:", error);
@@ -526,7 +528,7 @@ async function createPeerConnection() {
 
     peerConnection.onicecandidate = event => {
         if (event.candidate) {
-            signalingSocket.send(JSON.stringify({ type: 'candidate', candidate: event.candidate }));
+            send({ type: 'candidate', othername: connectedUser, candidate: event.candidate });
         }
     };
 
@@ -671,7 +673,11 @@ function endStream() {
      });
     startButton.textContent = 'Start';
     startButton.onclick = start;
-    stopAutoRedeem();
+    try {
+        stopAutoRedeem();
+    } catch (error) {
+        console.log(error);
+    }
     if(isConnectedToSimServer) {
         try {
             simServer.close();
@@ -708,8 +714,6 @@ function showSnackbar(message) {
         console.error('Error showing snackbar:', error);
     }
 }
-
-let isAudioEnabled = true;
 
 function toggleAudio() {
     isAudioEnabled = !isAudioEnabled;
