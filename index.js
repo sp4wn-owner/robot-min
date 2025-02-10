@@ -242,7 +242,7 @@ function handleLogin(success, errormessage, pic, tr, loc, des, priv, visibility,
         modalLogin.style.display = "none";
         configuration = config;
         profilePicture = pic || console.log("No picture");
-        tokenrate = tr || (console.log("No token rate"), 0);
+        tokenrate = Number(tr) || (console.log("No token rate"), 0);
         mylocation = loc || console.log("No location");
         description = des || console.log("No description");
         if (allowPrivateToggle && typeof priv === 'boolean') isPrivate = priv; else console.log("No private status");
@@ -516,6 +516,7 @@ async function createPeerConnection() {
     });
 
     peerConnection.onicecandidate = event => {
+        console.log("Received ice candidate");
         if (event.candidate) {
             send({ type: 'candidate', othername: connectedUser, candidate: event.candidate });
         }
