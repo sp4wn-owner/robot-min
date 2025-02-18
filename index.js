@@ -44,9 +44,11 @@ let isUserAuthenticated = false;
 const maxReconnectAttempts = 5;
 let reconnectAttempts = 0;
 let simReconnectAttempts = 0;
+let loginRetryTimeout;
 const reconnectDelay = 2000;
 const wsUrl = 'https://sp4wn-signaling-server.onrender.com';
 let isAudioEnabled = true;
+let constraints;
 
 document.addEventListener('DOMContentLoaded', () => {
     let simServerCookie = getCookie('simserverurl');
@@ -66,11 +68,11 @@ function openLoginModal() {
     modalLogin.style.display = "block";
 }
 
-closeLoginSpan.onclick = function() {
+closeLoginSpan.onclick = function () {
     modalLogin.style.display = "none";
 }
 
-passwordInput.addEventListener('keydown', function(event) {
+passwordInput.addEventListener('keydown', function (event) {
     if (event.key === 'Enter') {
         login();
     }
@@ -85,7 +87,7 @@ function login() {
         showSnackbar("Please enter username and password");
         return;
     }
-    
+
     connectToSignalingServer();
 }
 
@@ -111,7 +113,7 @@ async function connectToSignalingServer() {
         signalingSocket.onopen = () => {
             console.log("Authenticating user...");
             isConnectedToSignalingServer = true;
-            reconnectAttempts = 0; 
+            reconnectAttempts = 0;
             clearTimeout(connectionTimeout);
             send({
                 type: "robot",
@@ -124,7 +126,7 @@ async function connectToSignalingServer() {
         signalingSocket.onmessage = async (event) => {
             const message = JSON.parse(event.data);
             emitter.emit(message.type, message);
-            
+
             if (responseHandlers[message.type]) {
                 responseHandlers[message.type](message);
                 delete responseHandlers[message.type];
@@ -137,7 +139,7 @@ async function connectToSignalingServer() {
             clearTimeout(connectionTimeout);
             isConnectedToSignalingServer = false;
             console.log('Disconnected from signaling server');
-            if(isUserAuthenticated) {
+            if (isUserAuthenticated && !isConnectedToSignalingServer) {
                 handleReconnect();
             }
         };
@@ -152,13 +154,17 @@ async function connectToSignalingServer() {
 }
 
 function send(message) {
-    signalingSocket.send(JSON.stringify(message));
-};
+    try {
+        signalingSocket.send(JSON.stringify(message));
+    } catch (error) {
+        console.error('Error sending message:', error);
+    }
+}
 
 function handleReconnect() {
     if (reconnectAttempts < maxReconnectAttempts) {
         reconnectAttempts++;
-        const delay = reconnectDelay * reconnectAttempts; 
+        const delay = reconnectDelay * reconnectAttempts;
         console.log(`Reconnecting in ${delay / 1000} seconds... (Attempt ${reconnectAttempts})`);
         setTimeout(connectToSignalingServer, delay);
     } else {
@@ -211,11 +217,13 @@ async function handleSignalingData(message, resolve) {
     }
 }
 
-let loginRetryTimeout;
-
 function handleLogin(success, errormessage, pic, tr, loc, des, priv, visibility, config) {
     if (!success) {
         if (errormessage === "User is already logged in") {
+            if (isUserAuthenticated) {
+                console.log("Successfully logged in");
+                return;
+            }
             loginRetryTimeout = setTimeout(() => {
                 send({
                     type: "robot",
@@ -233,7 +241,7 @@ function handleLogin(success, errormessage, pic, tr, loc, des, priv, visibility,
             signalingSocket.close();
         }
     }
-    
+
     if (success) {
         clearTimeout(loginRetryTimeout);
         isUserAuthenticated = true;
@@ -259,11 +267,11 @@ async function watchStream(name, pw) {
             try {
                 const isValid = await verifyPassword(pw);
                 if (isValid) {
-                    if(tokenrate > 0) {
+                    if (tokenrate > 0) {
                         const isBalanceAvailable = await checkTokenBalance(name);
-                        if(isBalanceAvailable) {
+                        if (isBalanceAvailable) {
                             iceAndOffer(name);
-                        } else{
+                        } else {
                             console.log("User attempted to connect with valid password, but their balance was too low");
                         }
                     } else {
@@ -309,7 +317,7 @@ function checkUserTokenBalance(message) {
                 reject(error);
             }
         });
-    
+
         emitter.once('balanceChecked', (response) => {
             try {
                 resolve(response);
@@ -322,9 +330,9 @@ function checkUserTokenBalance(message) {
 
 function verifyPassword(pw) {
     return new Promise((resolve, reject) => {
-        if(handleSecretCodeAuth) {
+        if (handleSecretCodeAuth) {
             authenticateCode(pw).then(response => {
-                if(response.success) {
+                if (response.success) {
                     resolve(true);
                 } else {
                     reject(new Error("Secret code verification failed"));
@@ -366,19 +374,19 @@ async function authenticateCode(pw) {
 function sendPW(message) {
     return new Promise((resolve, reject) => {
         responseHandlers["authbotpw"] = (response) => {
-        try {
-            resolve(response);
-        } catch (error) {
-            reject(error);
-        }
-    };
-  
-    signalingSocket.send(JSON.stringify(message), (error) => {
-        if (error) {
-            reject(error);
-            return;
-        }
-    });
+            try {
+                resolve(response);
+            } catch (error) {
+                reject(error);
+            }
+        };
+
+        signalingSocket.send(JSON.stringify(message), (error) => {
+            if (error) {
+                reject(error);
+                return;
+            }
+        });
     });
 }
 
@@ -408,14 +416,14 @@ function createOffer() {
         peerConnection.createOffer()
             .then(offer => {
                 return peerConnection.setLocalDescription(offer)
-                .then(() => offer);
-             })
-            .then(offer => {               
+                    .then(() => offer);
+            })
+            .then(offer => {
                 send({
-                   type: "offer",
-                   offer: offer,
-                   username: username,
-                   host: connectedUser
+                    type: "offer",
+                    offer: offer,
+                    username: username,
+                    host: connectedUser
                 });
                 resolve();
             })
@@ -440,9 +448,9 @@ async function connectToSimServer() {
 
         simServer.onopen = () => {
             clearTimeout(simConnectionTimeout);
-            simReconnectAttempts = 0; 
+            simReconnectAttempts = 0;
             isConnectedToSimServer = true;
-            console.log("Connected to simulation server",  simServer);
+            console.log("Connected to simulation server", simServer);
             resolve();
         };
 
@@ -474,7 +482,7 @@ function sendToSimServer(message) {
 function handleSimReconnect() {
     if (simReconnectAttempts < maxReconnectAttempts) {
         simReconnectAttempts++;
-        const delay = reconnectDelay * simReconnectAttempts; 
+        const delay = reconnectDelay * simReconnectAttempts;
         console.log(`Reconnecting in ${delay / 1000} seconds... (Attempt ${simReconnectAttempts})`);
         setTimeout(connectToSimServer, delay);
     } else {
@@ -490,7 +498,7 @@ async function start() {
         simURL = simServerInput.value;
         if (simURL) {
             document.cookie = `simserver=${encodeURIComponent(simURL)}; max-age=31536000; path=/`;
-            if(!isConnectedToSimServer) {
+            if (!isConnectedToSimServer) {
                 await connectToSimServer();
             }
         }
@@ -498,13 +506,33 @@ async function start() {
 
     startButton.textContent = 'End';
     startButton.onclick = endStream;
+
+    constraints = {
+        video: {
+            width: { exact: 2560 },
+            height: { exact: 720 }
+        },
+        audio: isAudioEnabled
+    };
+
     try {
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: isAudioEnabled });
+        localStream = await navigator.mediaDevices.getUserMedia(constraints);
         localVideo.srcObject = localStream;
-        createPeerConnection();
+        createPeerConnection(localStream);
         pushLive();
-    } catch (err) {
-        showSnackbar('Error accessing media devices.', err);
+    } catch (specificConstraintError) {
+        try {
+            constraints = {
+                video: true,
+                audio: isAudioEnabled
+            };
+            localStream = await navigator.mediaDevices.getUserMedia(constraints);
+            localVideo.srcObject = localStream;
+            createPeerConnection(localStream);
+            pushLive();
+        } catch (defaultError) {
+            showSnackbar('Error accessing media devices.', defaultError);
+        }
     }
 }
 
@@ -529,7 +557,7 @@ async function createPeerConnection() {
     peerConnection.oniceconnectionstatechange = () => {
         if (!peerConnection) {
             console.error('Peer connection is not initialized.');
-            return; 
+            return;
         }
 
         switch (peerConnection.iceConnectionState) {
@@ -544,20 +572,20 @@ async function createPeerConnection() {
                 send({
                     type: "updatelive",
                     username: username
-                 });
+                });
                 break;
             case 'completed':
                 console.log('ICE Connection is completed.');
                 break;
             case 'failed':
-                console.log("peer connection failed");   
+                console.log("peer connection failed");
             case 'disconnected':
-                console.log("peer disconnected");   
+                console.log("peer disconnected");
                 pushLive();
             case 'closed':
-            break;
+                break;
         }
-    };      
+    };
 }
 
 async function pushLive() {
@@ -583,12 +611,12 @@ async function createDataChannel(type) {
 
     try {
         dataChannel = peerConnection.createDataChannel(type);
-        if(dataChannel) {
+        if (dataChannel) {
             console.log(`${type} channel created successfully.`);
         }
     } catch (error) {
         console.error(`Failed to create ${type} channel:`, error);
-        return; 
+        return;
     }
 
     if (type === 'input') {
@@ -612,9 +640,9 @@ function handleInputChannel(inputChannel) {
             console.error('Error parsing command:', e);
             return;
         }
-        
+
         cmd.type = 'tracking';
-    
+
         if (isConnectedToSimServer) {
             sendToSimServer(JSON.stringify(cmd));
             console.log("sent to sim server:", cmd);
@@ -642,17 +670,15 @@ async function stopAutoRedeem() {
         });
 
         const data = await response.json();
-        
+
         if (data.success) {
             console.log(data.message);
-            return true; 
+            return true;
         } else {
             console.log('Failed to stop auto-redemption:', data.error);
-            return false; 
         }
     } catch (error) {
         console.log('Error stopping auto-redemption:', error);
-        return false; 
     }
 }
 
@@ -660,7 +686,7 @@ function endStream() {
     send({
         type: "updatelive",
         username: username
-     });
+    });
     startButton.textContent = 'Start';
     startButton.onclick = start;
     try {
@@ -668,7 +694,7 @@ function endStream() {
     } catch (error) {
         console.log(error);
     }
-    if(isConnectedToSimServer) {
+    if (isConnectedToSimServer) {
         try {
             simServer.close();
             isConnectedToSimServer = false;
@@ -696,8 +722,8 @@ function showSnackbar(message) {
     try {
         snackbar.textContent = message;
         snackbar.className = 'snackbar show';
- 
-        setTimeout(function() {
+
+        setTimeout(function () {
             snackbar.className = snackbar.className.replace('show', '');
         }, 5000);
     } catch (error) {
@@ -717,10 +743,10 @@ function toggleAudio() {
     }
 
     if (localStream) {
-      localStream.getAudioTracks().forEach(track => {
-          track.enabled = isAudioEnabled;
-      });
-  }
+        localStream.getAudioTracks().forEach(track => {
+            track.enabled = isAudioEnabled;
+        });
+    }
 }
 
 startButton.onclick = start;
@@ -751,4 +777,4 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-!function(e){"object"==typeof exports&&"undefined"!=typeof module?module.exports=e():"function"==typeof define&&define.amd?define([],e):("undefined"!=typeof window?window:"undefined"!=typeof global?global:"undefined"!=typeof self?self:this).EventEmitter3=e()}(function(){return function i(s,f,c){function u(t,e){if(!f[t]){if(!s[t]){var n="function"==typeof require&&require;if(!e&&n)return n(t,!0);if(a)return a(t,!0);var r=new Error("Cannot find module '"+t+"'");throw r.code="MODULE_NOT_FOUND",r}var o=f[t]={exports:{}};s[t][0].call(o.exports,function(e){return u(s[t][1][e]||e)},o,o.exports,i,s,f,c)}return f[t].exports}for(var a="function"==typeof require&&require,e=0;e<c.length;e++)u(c[e]);return u}({1:[function(e,t,n){"use strict";var r=Object.prototype.hasOwnProperty,v="~";function o(){}function f(e,t,n){this.fn=e,this.context=t,this.once=n||!1}function i(e,t,n,r,o){if("function"!=typeof n)throw new TypeError("The listener must be a function");var i=new f(n,r||e,o),s=v?v+t:t;return e._events[s]?e._events[s].fn?e._events[s]=[e._events[s],i]:e._events[s].push(i):(e._events[s]=i,e._eventsCount++),e}function u(e,t){0==--e._eventsCount?e._events=new o:delete e._events[t]}function s(){this._events=new o,this._eventsCount=0}Object.create&&(o.prototype=Object.create(null),(new o).__proto__||(v=!1)),s.prototype.eventNames=function(){var e,t,n=[];if(0===this._eventsCount)return n;for(t in e=this._events)r.call(e,t)&&n.push(v?t.slice(1):t);return Object.getOwnPropertySymbols?n.concat(Object.getOwnPropertySymbols(e)):n},s.prototype.listeners=function(e){var t=v?v+e:e,n=this._events[t];if(!n)return[];if(n.fn)return[n.fn];for(var r=0,o=n.length,i=new Array(o);r<o;r++)i[r]=n[r].fn;return i},s.prototype.listenerCount=function(e){var t=v?v+e:e,n=this._events[t];return n?n.fn?1:n.length:0},s.prototype.emit=function(e,t,n,r,o,i){var s=v?v+e:e;if(!this._events[s])return!1;var f,c=this._events[s],u=arguments.length;if(c.fn){switch(c.once&&this.removeListener(e,c.fn,void 0,!0),u){case 1:return c.fn.call(c.context),!0;case 2:return c.fn.call(c.context,t),!0;case 3:return c.fn.call(c.context,t,n),!0;case 4:return c.fn.call(c.context,t,n,r),!0;case 5:return c.fn.call(c.context,t,n,r,o),!0;case 6:return c.fn.call(c.context,t,n,r,o,i),!0}for(p=1,f=new Array(u-1);p<u;p++)f[p-1]=arguments[p];c.fn.apply(c.context,f)}else for(var a,l=c.length,p=0;p<l;p++)switch(c[p].once&&this.removeListener(e,c[p].fn,void 0,!0),u){case 1:c[p].fn.call(c[p].context);break;case 2:c[p].fn.call(c[p].context,t);break;case 3:c[p].fn.call(c[p].context,t,n);break;case 4:c[p].fn.call(c[p].context,t,n,r);break;default:if(!f)for(a=1,f=new Array(u-1);a<u;a++)f[a-1]=arguments[a];c[p].fn.apply(c[p].context,f)}return!0},s.prototype.on=function(e,t,n){return i(this,e,t,n,!1)},s.prototype.once=function(e,t,n){return i(this,e,t,n,!0)},s.prototype.removeListener=function(e,t,n,r){var o=v?v+e:e;if(!this._events[o])return this;if(!t)return u(this,o),this;var i=this._events[o];if(i.fn)i.fn!==t||r&&!i.once||n&&i.context!==n||u(this,o);else{for(var s=0,f=[],c=i.length;s<c;s++)(i[s].fn!==t||r&&!i[s].once||n&&i[s].context!==n)&&f.push(i[s]);f.length?this._events[o]=1===f.length?f[0]:f:u(this,o)}return this},s.prototype.removeAllListeners=function(e){var t;return e?(t=v?v+e:e,this._events[t]&&u(this,t)):(this._events=new o,this._eventsCount=0),this},s.prototype.off=s.prototype.removeListener,s.prototype.addListener=s.prototype.on,s.prefixed=v,s.EventEmitter=s,void 0!==t&&(t.exports=s)},{}]},{},[1])(1)});
+!function (e) { "object" == typeof exports && "undefined" != typeof module ? module.exports = e() : "function" == typeof define && define.amd ? define([], e) : ("undefined" != typeof window ? window : "undefined" != typeof global ? global : "undefined" != typeof self ? self : this).EventEmitter3 = e() }(function () { return function i(s, f, c) { function u(t, e) { if (!f[t]) { if (!s[t]) { var n = "function" == typeof require && require; if (!e && n) return n(t, !0); if (a) return a(t, !0); var r = new Error("Cannot find module '" + t + "'"); throw r.code = "MODULE_NOT_FOUND", r } var o = f[t] = { exports: {} }; s[t][0].call(o.exports, function (e) { return u(s[t][1][e] || e) }, o, o.exports, i, s, f, c) } return f[t].exports } for (var a = "function" == typeof require && require, e = 0; e < c.length; e++)u(c[e]); return u }({ 1: [function (e, t, n) { "use strict"; var r = Object.prototype.hasOwnProperty, v = "~"; function o() { } function f(e, t, n) { this.fn = e, this.context = t, this.once = n || !1 } function i(e, t, n, r, o) { if ("function" != typeof n) throw new TypeError("The listener must be a function"); var i = new f(n, r || e, o), s = v ? v + t : t; return e._events[s] ? e._events[s].fn ? e._events[s] = [e._events[s], i] : e._events[s].push(i) : (e._events[s] = i, e._eventsCount++), e } function u(e, t) { 0 == --e._eventsCount ? e._events = new o : delete e._events[t] } function s() { this._events = new o, this._eventsCount = 0 } Object.create && (o.prototype = Object.create(null), (new o).__proto__ || (v = !1)), s.prototype.eventNames = function () { var e, t, n = []; if (0 === this._eventsCount) return n; for (t in e = this._events) r.call(e, t) && n.push(v ? t.slice(1) : t); return Object.getOwnPropertySymbols ? n.concat(Object.getOwnPropertySymbols(e)) : n }, s.prototype.listeners = function (e) { var t = v ? v + e : e, n = this._events[t]; if (!n) return []; if (n.fn) return [n.fn]; for (var r = 0, o = n.length, i = new Array(o); r < o; r++)i[r] = n[r].fn; return i }, s.prototype.listenerCount = function (e) { var t = v ? v + e : e, n = this._events[t]; return n ? n.fn ? 1 : n.length : 0 }, s.prototype.emit = function (e, t, n, r, o, i) { var s = v ? v + e : e; if (!this._events[s]) return !1; var f, c = this._events[s], u = arguments.length; if (c.fn) { switch (c.once && this.removeListener(e, c.fn, void 0, !0), u) { case 1: return c.fn.call(c.context), !0; case 2: return c.fn.call(c.context, t), !0; case 3: return c.fn.call(c.context, t, n), !0; case 4: return c.fn.call(c.context, t, n, r), !0; case 5: return c.fn.call(c.context, t, n, r, o), !0; case 6: return c.fn.call(c.context, t, n, r, o, i), !0 }for (p = 1, f = new Array(u - 1); p < u; p++)f[p - 1] = arguments[p]; c.fn.apply(c.context, f) } else for (var a, l = c.length, p = 0; p < l; p++)switch (c[p].once && this.removeListener(e, c[p].fn, void 0, !0), u) { case 1: c[p].fn.call(c[p].context); break; case 2: c[p].fn.call(c[p].context, t); break; case 3: c[p].fn.call(c[p].context, t, n); break; case 4: c[p].fn.call(c[p].context, t, n, r); break; default: if (!f) for (a = 1, f = new Array(u - 1); a < u; a++)f[a - 1] = arguments[a]; c[p].fn.apply(c[p].context, f) }return !0 }, s.prototype.on = function (e, t, n) { return i(this, e, t, n, !1) }, s.prototype.once = function (e, t, n) { return i(this, e, t, n, !0) }, s.prototype.removeListener = function (e, t, n, r) { var o = v ? v + e : e; if (!this._events[o]) return this; if (!t) return u(this, o), this; var i = this._events[o]; if (i.fn) i.fn !== t || r && !i.once || n && i.context !== n || u(this, o); else { for (var s = 0, f = [], c = i.length; s < c; s++)(i[s].fn !== t || r && !i[s].once || n && i[s].context !== n) && f.push(i[s]); f.length ? this._events[o] = 1 === f.length ? f[0] : f : u(this, o) } return this }, s.prototype.removeAllListeners = function (e) { var t; return e ? (t = v ? v + e : e, this._events[t] && u(this, t)) : (this._events = new o, this._eventsCount = 0), this }, s.prototype.off = s.prototype.removeListener, s.prototype.addListener = s.prototype.on, s.prefixed = v, s.EventEmitter = s, void 0 !== t && (t.exports = s) }, {}] }, {}, [1])(1) });
