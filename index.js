@@ -35,7 +35,7 @@ let signalingSocket;
 let simServer;
 let simURL;
 let inputChannel;
-const botdevicetype = "vr";
+const botdevicetype = "pc";
 let responseHandlers = {};
 let emitter;
 let isConnectedToSignalingServer = false;
