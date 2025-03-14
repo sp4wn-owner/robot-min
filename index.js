@@ -108,7 +108,7 @@ async function connectToSignalingServer() {
                 console.log(error);
             }
             reject(new Error('Connection timed out'));
-        }, 10000);
+        }, 30000);
 
         signalingSocket.onopen = () => {
             console.log("Authenticating user...");
