@@ -509,8 +509,8 @@ async function start() {
 
     constraints = {
         video: {
-            width: { exact: 2560 },
-            height: { exact: 720 }
+            width: { exact: 3840 },
+            height: { exact: 1080 }
         },
         audio: isAudioEnabled
     };
@@ -523,7 +523,10 @@ async function start() {
     } catch (specificConstraintError) {
         try {
             constraints = {
-                video: true,
+                video: {
+                    width: { exact: 2560 },
+                    height: { exact: 720 }
+                },
                 audio: isAudioEnabled
             };
             localStream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -531,7 +534,18 @@ async function start() {
             createPeerConnection(localStream);
             pushLive();
         } catch (defaultError) {
-            showSnackbar('Error accessing media devices.', defaultError);
+            try {
+                constraints = {
+                    video: true,
+                    audio: isAudioEnabled
+                };
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                localVideo.srcObject = localStream;
+                createPeerConnection(localStream);
+                pushLive();
+            } catch (error) {
+                showSnackbar('Error accessing media devices.', error);
+            }
         }
     }
 }
